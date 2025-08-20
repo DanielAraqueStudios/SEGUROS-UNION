@@ -1,9 +1,11 @@
 
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QFileDialog, QLabel
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QFileDialog, QLabel, QFrame)
 from PyQt6.QtGui import QPalette, QColor, QFont
 from PyQt6.QtCore import Qt
+from PyQt6.QtCharts import QChart, QChartView, QBarSeries, QBarSet, QBarCategoryAxis, QValueAxis
 import backend
+import dashboard_utils
 
 class DarkMainWindow(QMainWindow):
     def __init__(self):
@@ -16,21 +18,34 @@ class DarkMainWindow(QMainWindow):
 
     def initUI(self):
         central = QWidget()
-        layout = QVBoxLayout()
+        main_layout = QVBoxLayout()
 
-        self.label = QLabel("Visualizador de Informe de Producción")
+        self.label = QLabel("Dashboard de Producción - SEGUROS UNION")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setStyleSheet("font-size: 22px; font-weight: bold;")
-        layout.addWidget(self.label)
+        main_layout.addWidget(self.label)
 
         self.btnCargar = QPushButton("Cargar Informe")
         self.btnCargar.clicked.connect(self.cargarDatos)
-        layout.addWidget(self.btnCargar)
+        main_layout.addWidget(self.btnCargar)
 
+        # Panel de métricas
+        self.metric_frame = QFrame()
+        self.metric_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.metric_layout = QHBoxLayout()
+        self.metric_frame.setLayout(self.metric_layout)
+        main_layout.addWidget(self.metric_frame)
+
+        # Gráfica
+        self.chart_view = QChartView()
+        self.chart_view.setMinimumHeight(250)
+        main_layout.addWidget(self.chart_view)
+
+        # Tabla de datos
         self.tabla = QTableWidget()
-        layout.addWidget(self.tabla)
+        main_layout.addWidget(self.tabla)
 
-        central.setLayout(layout)
+        central.setLayout(main_layout)
         self.setCentralWidget(central)
 
     def applyDarkTheme(self):
@@ -54,11 +69,54 @@ class DarkMainWindow(QMainWindow):
         if ruta:
             df = backend.leer_excel(ruta)
             if df is not None:
-                self.mostrarDatos(df)
+                self.df = df
+                self.metricas = dashboard_utils.obtener_metricas(df)
+                self.mostrarDashboard()
             else:
                 self.label.setText("Error al leer el archivo.")
 
-    def mostrarDatos(self, df):
+    def mostrarDashboard(self):
+        # Panel de métricas
+        for i in reversed(range(self.metric_layout.count())):
+            self.metric_layout.itemAt(i).widget().setParent(None)
+        m = self.metricas
+        def metric_label(text, value):
+            lbl = QLabel(f"<b>{text}</b><br><span style='font-size:20px;'>{value}</span>")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet("background: #222; border-radius: 8px; padding: 12px; margin: 6px; color: #fff;")
+            return lbl
+        if 'total_primas' in m:
+            self.metric_layout.addWidget(metric_label("Total Primas", f"${m['total_primas']:,}"))
+        if 'total_polizas' in m:
+            self.metric_layout.addWidget(metric_label("Total Pólizas", m['total_polizas']))
+        if 'total_clientes' in m:
+            self.metric_layout.addWidget(metric_label("Total Clientes", m['total_clientes']))
+        if 'siniestros' in m:
+            self.metric_layout.addWidget(metric_label("Siniestros", m['siniestros']))
+
+        # Gráfica animada: primas por mes
+        self.chart_view.setChart(QChart())
+        chart = self.chart_view.chart()
+        chart.setTitle("Primas por Mes")
+        chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+        if 'primas_por_mes' in m:
+            meses = [str(k) for k in m['primas_por_mes'].keys()]
+            primas = [v for v in m['primas_por_mes'].values()]
+            barset = QBarSet("Primas")
+            barset.append(primas)
+            series = QBarSeries()
+            series.append(barset)
+            chart.addSeries(series)
+            axisX = QBarCategoryAxis()
+            axisX.append(meses)
+            chart.setAxisX(axisX, series)
+            axisY = QValueAxis()
+            axisY.setLabelFormat("$%.0f")
+            chart.setAxisY(axisY, series)
+        chart.setTheme(QChart.ChartTheme.ChartThemeDark)
+
+        # Tabla de datos
+        df = self.df
         self.tabla.clear()
         self.tabla.setRowCount(df.shape[0])
         self.tabla.setColumnCount(df.shape[1])
@@ -67,7 +125,7 @@ class DarkMainWindow(QMainWindow):
             for j in range(df.shape[1]):
                 item = QTableWidgetItem(str(df.iat[i, j]))
                 self.tabla.setItem(i, j, item)
-        self.label.setText(f"Mostrando {df.shape[0]} filas y {df.shape[1]} columnas")
+        self.label.setText(f"Dashboard: {df.shape[0]} filas, {df.shape[1]} columnas")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
